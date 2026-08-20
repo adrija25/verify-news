@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database import Base, engine, get_db
-from extraction import prepare_claim
+from extraction import extract_claims, prepare_claim
 from models import Claim, Verification
 from schemas import (
     ArticleVerificationRequest,
@@ -47,10 +47,15 @@ def get_user_identifier() -> str:
 
     Authentication will be introduced later if required.
     """
+
     return "anonymous"
 
 
 def build_evidence_response(evidence) -> list[EvidenceResponse]:
+    """
+    Convert internal evidence objects into API response objects.
+    """
+
     return [
         EvidenceResponse(
             source_name=item.publisher or item.domain or "Unknown source",
@@ -69,6 +74,10 @@ def store_verification(
     prepared_claim: dict,
     result,
 ) -> Verification:
+    """
+    Store one claim and its verification result.
+    """
+
     claim = Claim(
         original_text=prepared_claim["original_text"],
         normalized_text=prepared_claim["normalized_text"],
@@ -89,7 +98,6 @@ def store_verification(
     )
 
     db.add(verification)
-
     db.commit()
     db.refresh(verification)
 
@@ -99,11 +107,17 @@ def store_verification(
 def build_verification_response(
     verification: Verification,
 ) -> VerificationResponse:
+    """
+    Build the full verification response for a stored verification.
+    """
+
     claim = verification.claim
 
     evidence_response = [
         EvidenceResponse(
-            source_name=item.source.publisher or item.source.domain or "Unknown source",
+            source_name=item.source.publisher
+            or item.source.domain
+            or "Unknown source",
             source_type=item.source.source_type or "Unknown",
             source_url=item.source.url,
             publication_date=item.source.publication_date,
@@ -144,6 +158,10 @@ def verify_claim_endpoint(
     request: ClaimVerificationRequest,
     db: Session = Depends(get_db),
 ):
+    """
+    Verify one user-submitted claim.
+    """
+
     user_identifier = get_user_identifier()
 
     if not can_verify(db, user_identifier):
@@ -191,6 +209,11 @@ def verify_article_endpoint(
     request: ArticleVerificationRequest,
     db: Session = Depends(get_db),
 ):
+    """
+    Extract multiple likely factual claims from an article
+    and verify them individually.
+    """
+
     if not request.article_text.strip():
         raise HTTPException(
             status_code=400,
@@ -205,48 +228,63 @@ def verify_article_endpoint(
             detail="The free daily verification limit has been reached.",
         )
 
-    prepared_claim = prepare_claim(request.article_text)
+    claims = extract_claims(
+        request.article_text,
+        max_claims=5,
+    )
 
-    if not prepared_claim["normalized_text"]:
-        raise HTTPException(
-            status_code=400,
-            detail="The article does not contain usable text.",
+    if not claims:
+        prepared_claim = prepare_claim(request.article_text)
+
+        if not prepared_claim["normalized_text"]:
+            raise HTTPException(
+                status_code=400,
+                detail="The article does not contain usable text.",
+            )
+
+        claims = [prepared_claim]
+
+    article_results = []
+
+    for prepared_claim in claims:
+        evidence = evidence_service.search(
+            prepared_claim["normalized_text"]
         )
 
-    evidence = evidence_service.search(
-        prepared_claim["normalized_text"]
-    )
+        result = verify_claim(
+            prepared_claim["normalized_text"],
+            evidence,
+        )
 
-    result = verify_claim(
-        prepared_claim["normalized_text"],
-        evidence,
-    )
+        verification = store_verification(
+            db,
+            prepared_claim,
+            result,
+        )
 
-    verification = store_verification(
-        db,
-        prepared_claim,
-        result,
-    )
+        article_results.append(
+            ArticleClaimResult(
+                claim=prepared_claim["original_text"],
+                verification_id=verification.id,
+                verdict=result.verdict,
+                confidence=result.confidence,
+                explanation=result.explanation,
+                evidence=build_evidence_response(
+                    result.evidence
+                ),
+            )
+        )
 
     record_verification(
         db,
         user_identifier,
     )
 
-    article_claim = ArticleClaimResult(
-        claim=prepared_claim["original_text"],
-        verification_id=verification.id,
-        verdict=result.verdict,
-        confidence=result.confidence,
-        explanation=result.explanation,
-        evidence=build_evidence_response(result.evidence),
-    )
-
     return ArticleVerificationResponse(
         title=request.title,
         publisher=request.publisher,
         url=request.url,
-        claims=[article_claim],
+        claims=article_results,
     )
 
 
@@ -258,6 +296,10 @@ def get_verification(
     verification_id: int,
     db: Session = Depends(get_db),
 ):
+    """
+    Retrieve a previously stored verification.
+    """
+
     verification = db.get(
         Verification,
         verification_id,
@@ -276,6 +318,10 @@ def get_verification(
 def get_history(
     db: Session = Depends(get_db),
 ):
+    """
+    Return the most recent verification history.
+    """
+
     statement = (
         select(Verification)
         .join(Verification.claim)
@@ -283,7 +329,9 @@ def get_history(
         .limit(50)
     )
 
-    verifications = db.execute(statement).scalars().all()
+    verifications = db.execute(
+        statement
+    ).scalars().all()
 
     return {
         "items": [

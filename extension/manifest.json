@@ -1,1 +1,19 @@
-
+{
+  "manifest_version": 3,
+  "name": "Verify News",
+  "version": "1.0.0",
+  "description": "Evaluate news claims against available evidence and understand what supports, contradicts, or remains unverified.",
+  "author": "Arthiva Labs",
+  "homepage_url": "https://www.arthiva-labs.com/",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_title": "Verify News",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

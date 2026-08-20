@@ -1,14 +1,15 @@
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from analysis import analyze_evidence
 from database import Base, engine, get_db
 from extraction import prepare_claim
 from models import Claim, Verification
 from schemas import (
     ArticleVerificationRequest,
     ArticleVerificationResponse,
+    ArticleClaimResult,
     ClaimVerificationRequest,
     EvidenceResponse,
     HealthResponse,
@@ -52,8 +53,8 @@ def get_user_identifier() -> str:
 def build_evidence_response(evidence) -> list[EvidenceResponse]:
     return [
         EvidenceResponse(
-            source_name=item.publisher,
-            source_type=item.source_type,
+            source_name=item.publisher or item.domain or "Unknown source",
+            source_type=item.source_type or "Unknown",
             source_url=item.url,
             publication_date=item.publication_date,
             evidence_text=item.evidence_text,
@@ -88,10 +89,40 @@ def store_verification(
     )
 
     db.add(verification)
+
     db.commit()
     db.refresh(verification)
 
     return verification
+
+
+def build_verification_response(
+    verification: Verification,
+) -> VerificationResponse:
+    claim = verification.claim
+
+    evidence_response = [
+        EvidenceResponse(
+            source_name=item.source.publisher or item.source.domain or "Unknown source",
+            source_type=item.source.source_type or "Unknown",
+            source_url=item.source.url,
+            publication_date=item.source.publication_date,
+            evidence_text=item.evidence_text,
+            relationship=item.relationship,
+        )
+        for item in claim.evidence
+    ]
+
+    return VerificationResponse(
+        verification_id=verification.id,
+        claim=claim.original_text,
+        normalized_claim=claim.normalized_text,
+        verdict=verification.verdict,
+        confidence=verification.confidence,
+        explanation=verification.explanation,
+        evidence=evidence_response,
+        verified_at=verification.verified_at,
+    )
 
 
 @app.get(
@@ -118,9 +149,7 @@ def verify_claim_endpoint(
     if not can_verify(db, user_identifier):
         raise HTTPException(
             status_code=429,
-            detail=(
-                "The free daily verification limit has been reached."
-            ),
+            detail="The free daily verification limit has been reached.",
         )
 
     prepared_claim = prepare_claim(request.claim)
@@ -135,21 +164,10 @@ def verify_claim_endpoint(
         prepared_claim["normalized_text"]
     )
 
-    analysis = analyze_evidence(
-        prepared_claim["normalized_text"],
-        evidence,
-    )
-
     result = verify_claim(
         prepared_claim["normalized_text"],
         evidence,
     )
-
-    if not result.explanation:
-        result.explanation = (
-            "The verification result was generated from the "
-            "available evidence."
-        )
 
     verification = store_verification(
         db,
@@ -162,16 +180,7 @@ def verify_claim_endpoint(
         user_identifier,
     )
 
-    return VerificationResponse(
-        verification_id=verification.id,
-        claim=prepared_claim["original_text"],
-        normalized_claim=prepared_claim["normalized_text"],
-        verdict=result.verdict,
-        confidence=result.confidence,
-        explanation=result.explanation,
-        evidence=build_evidence_response(result.evidence),
-        verified_at=verification.verified_at,
-    )
+    return build_verification_response(verification)
 
 
 @app.post(
@@ -193,9 +202,7 @@ def verify_article_endpoint(
     if not can_verify(db, user_identifier):
         raise HTTPException(
             status_code=429,
-            detail=(
-                "The free daily verification limit has been reached."
-            ),
+            detail="The free daily verification limit has been reached.",
         )
 
     prepared_claim = prepare_claim(request.article_text)
@@ -226,14 +233,14 @@ def verify_article_endpoint(
         user_identifier,
     )
 
-    article_claim = {
-        "claim": prepared_claim["original_text"],
-        "verification_id": verification.id,
-        "verdict": result.verdict,
-        "confidence": result.confidence,
-        "explanation": result.explanation,
-        "evidence": build_evidence_response(result.evidence),
-    }
+    article_claim = ArticleClaimResult(
+        claim=prepared_claim["original_text"],
+        verification_id=verification.id,
+        verdict=result.verdict,
+        confidence=result.confidence,
+        explanation=result.explanation,
+        evidence=build_evidence_response(result.evidence),
+    )
 
     return ArticleVerificationResponse(
         title=request.title,
@@ -262,32 +269,31 @@ def get_verification(
             detail="Verification not found.",
         )
 
-    claim = verification.claim
+    return build_verification_response(verification)
 
-    evidence = [
-        item
-        for item in claim.evidence
-    ]
 
-    evidence_response = [
-        EvidenceResponse(
-            source_name=item.source.publisher or item.source.domain or "",
-            source_type=item.source.source_type or "Unknown",
-            source_url=item.source.url,
-            publication_date=item.source.publication_date,
-            evidence_text=item.evidence_text,
-            relationship=item.relationship,
-        )
-        for item in evidence
-    ]
-
-    return VerificationResponse(
-        verification_id=verification.id,
-        claim=claim.original_text,
-        normalized_claim=claim.normalized_text,
-        verdict=verification.verdict,
-        confidence=verification.confidence,
-        explanation=verification.explanation,
-        evidence=evidence_response,
-        verified_at=verification.verified_at,
+@app.get("/api/history")
+def get_history(
+    db: Session = Depends(get_db),
+):
+    statement = (
+        select(Verification)
+        .join(Verification.claim)
+        .order_by(Verification.verified_at.desc())
+        .limit(50)
     )
+
+    verifications = db.execute(statement).scalars().all()
+
+    return {
+        "items": [
+            {
+                "verification_id": verification.id,
+                "claim": verification.claim.original_text,
+                "verdict": verification.verdict,
+                "confidence": verification.confidence,
+                "verified_at": verification.verified_at,
+            }
+            for verification in verifications
+        ]
+    }

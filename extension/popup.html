@@ -1,0 +1,62 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify News</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="popup">
+    <header class="header">
+      <div class="brand">
+        <h1>Verify News</h1>
+        <p>Evidence-based claim verification</p>
+      </div>
+    </header>
+
+    <section class="actions" aria-label="Verification options">
+      <button id="verifyArticleButton" type="button">
+        Verify This Article
+      </button>
+
+      <button id="verifyClaimButton" type="button">
+        Verify a Claim
+      </button>
+    </section>
+
+    <section id="claimSection" class="claim-section" hidden>
+      <label for="claimInput">What claim do you want to verify?</label>
+
+      <textarea
+        id="claimInput"
+        rows="5"
+        placeholder="Enter the claim you want to verify..."
+      ></textarea>
+
+      <button id="submitClaimButton" type="button">
+        Verify Claim
+      </button>
+    </section>
+
+    <section id="statusSection" class="status-section" aria-live="polite">
+      <span id="statusIndicator" aria-hidden="true"></span>
+      <span id="statusText">Backend: Checking...</span>
+    </section>
+
+    <section class="secondary-actions">
+      <button id="historyButton" type="button">
+        History
+      </button>
+    </section>
+
+    <footer class="footer">
+      <span>Arthiva Labs</span>
+    </footer>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+```

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from sources import EvidenceSource
+from sources import EvidenceItem
 
 
 SUPPORTED = "SUPPORTED"
@@ -19,12 +19,12 @@ class VerificationResult:
     verdict: str
     confidence: str
     explanation: str
-    evidence: list[EvidenceSource]
+    evidence: list[EvidenceItem]
 
 
 def verify_claim(
     claim: str,
-    evidence: list[EvidenceSource],
+    evidence: list[EvidenceItem],
 ) -> VerificationResult:
     """
     Evaluate a claim against retrieved evidence.
@@ -169,8 +169,8 @@ def verify_claim(
 
 
 def _calculate_confidence(
-    supporting: list[EvidenceSource],
-    contradicting: list[EvidenceSource],
+    supporting: list[EvidenceItem],
+    contradicting: list[EvidenceItem],
 ) -> str:
     """
     Estimate confidence conservatively from the available evidence.

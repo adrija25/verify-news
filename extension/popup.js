@@ -1,90 +1,140 @@
-const BACKEND_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = "http://localhost:8000";
 
-const verifyArticleButton = document.getElementById("verifyArticleButton");
-const verifyClaimButton = document.getElementById("verifyClaimButton");
-const submitClaimButton = document.getElementById("submitClaimButton");
-const historyButton = document.getElementById("historyButton");
+const claimInput = document.getElementById("claim");
+const verifyButton = document.getElementById("verifyButton");
 
-const claimSection = document.getElementById("claimSection");
-const claimInput = document.getElementById("claimInput");
+const statusElement = document.getElementById("status");
+const resultElement = document.getElementById("result");
 
-const statusIndicator = document.getElementById("statusIndicator");
-const statusText = document.getElementById("statusText");
+const verdictElement = document.getElementById("verdict");
+const confidenceElement = document.getElementById("confidence");
+const explanationElement = document.getElementById("explanation");
 
-function setBackendStatus(connected) {
-  if (connected) {
-    statusIndicator.style.background = "#16a34a";
-    statusText.textContent = "Backend: Connected";
-  } else {
-    statusIndicator.style.background = "#dc2626";
-    statusText.textContent = "Backend: Offline";
-  }
+
+function showStatus(message) {
+  statusElement.textContent = message;
+  statusElement.style.display = "block";
 }
 
-async function checkBackend() {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/health`, {
-      method: "GET"
-    });
 
-    if (!response.ok) {
-      throw new Error("Backend health check failed.");
-    }
-
-    setBackendStatus(true);
-  } catch (error) {
-    setBackendStatus(false);
-  }
+function hideStatus() {
+  statusElement.style.display = "none";
 }
 
-verifyArticleButton.addEventListener("click", () => {
-  chrome.tabs.query(
-    {
-      active: true,
-      currentWindow: true
-    },
-    (tabs) => {
-      const activeTab = tabs[0];
 
-      if (!activeTab || !activeTab.id) {
-        return;
-      }
+function showResult(data) {
+  verdictElement.textContent = formatVerdict(data.verdict);
+  confidenceElement.textContent = formatConfidence(data.confidence);
+  explanationElement.textContent = data.explanation || "No explanation available.";
 
-      chrome.tabs.sendMessage(
-        activeTab.id,
-        {
-          type: "VERIFY_ARTICLE"
-        },
-        () => {
-          if (chrome.runtime.lastError) {
-            statusText.textContent =
-              "Unable to read this page. Try verifying a claim manually.";
-          }
-        }
-      );
-    }
-  );
-});
+  resultElement.style.display = "block";
+}
 
-verifyClaimButton.addEventListener("click", () => {
-  claimSection.hidden = false;
-  claimInput.focus();
-});
 
-submitClaimButton.addEventListener("click", () => {
+function hideResult() {
+  resultElement.style.display = "none";
+}
+
+
+function formatVerdict(verdict) {
+  if (!verdict) {
+    return "UNVERIFIED";
+  }
+
+  return verdict.replaceAll("_", " ");
+}
+
+
+function formatConfidence(confidence) {
+  if (!confidence) {
+    return "Unknown";
+  }
+
+  return confidence.charAt(0) + confidence.slice(1).toLowerCase();
+}
+
+
+async function verifyClaim() {
   const claim = claimInput.value.trim();
 
+  hideResult();
+
   if (!claim) {
-    statusText.textContent = "Enter a claim before verifying.";
-    claimInput.focus();
+    showStatus("Please enter a claim to verify.");
     return;
   }
 
-  statusText.textContent = "Claim verification will be connected next.";
-});
+  verifyButton.disabled = true;
+  showStatus("Checking available evidence...");
 
-historyButton.addEventListener("click", () => {
-  statusText.textContent = "Verification history will be connected next.";
-});
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/verify/claim`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          claim: claim
+        })
+      }
+    );
 
-checkBackend();
+    let data = null;
+
+    try {
+      data = await response.json();
+    } catch (error) {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const message =
+        data && data.detail
+          ? data.detail
+          : "The verification request failed.";
+
+      throw new Error(message);
+    }
+
+    hideStatus();
+    showResult(data);
+
+  } catch (error) {
+    hideResult();
+
+    if (error instanceof TypeError) {
+      showStatus(
+        "Verify News could not connect to the backend. " +
+        "Make sure the FastAPI server is running."
+      );
+    } else {
+      showStatus(
+        error.message || "Something went wrong while verifying the claim."
+      );
+    }
+
+  } finally {
+    verifyButton.disabled = false;
+  }
+}
+
+
+verifyButton.addEventListener(
+  "click",
+  verifyClaim
+);
+
+
+claimInput.addEventListener(
+  "keydown",
+  function (event) {
+    if (
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      verifyClaim();
+    }
+  }
+);

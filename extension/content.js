@@ -1,118 +1,56 @@
-function getMetaContent(selector) {
-  const element = document.querySelector(selector);
-  return element ? element.getAttribute("content") || "" : "";
-}
-
-function getFirstText(selectors) {
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-
-    if (element) {
-      const text = element.textContent.trim();
-
-      if (text) {
-        return text;
-      }
-    }
-  }
-
-  return "";
-}
-
-function getArticleTitle() {
-  return (
-    getMetaContent('meta[property="og:title"]') ||
-    getMetaContent('meta[name="twitter:title"]') ||
-    getFirstText([
-      "h1",
-      "article h1",
-      '[itemprop="headline"]'
-    ]) ||
+function extractPageData() {
+  const title =
+    document.querySelector("meta[property='og:title']")?.content ||
+    document.querySelector("h1")?.innerText ||
     document.title ||
-    ""
-  );
-}
+    "";
 
-function getPublisher() {
-  return (
-    getMetaContent('meta[property="og:site_name"]') ||
-    getMetaContent('meta[name="publisher"]') ||
-    window.location.hostname
-  );
-}
+  const description =
+    document.querySelector("meta[name='description']")?.content ||
+    document.querySelector("meta[property='og:description']")?.content ||
+    "";
 
-function getAuthor() {
-  return (
-    getMetaContent('meta[name="author"]') ||
-    getMetaContent('meta[property="article:author"]') ||
-    getFirstText([
-      '[rel="author"]',
-      '[itemprop="author"]',
-      ".author",
-      ".byline"
-    ])
-  );
-}
+  const author =
+    document.querySelector("meta[name='author']")?.content ||
+    document.querySelector("[rel='author']")?.innerText ||
+    "";
 
-function getPublicationDate() {
-  return (
-    getMetaContent('meta[property="article:published_time"]') ||
-    getMetaContent('meta[name="date"]') ||
-    getMetaContent('meta[name="publish-date"]') ||
-    getMetaContent('meta[itemprop="datePublished"]') ||
-    ""
-  );
-}
+  const publishedTime =
+    document.querySelector("meta[property='article:published_time']")?.content ||
+    document.querySelector("time")?.getAttribute("datetime") ||
+    document.querySelector("time")?.innerText ||
+    "";
 
-function getArticleText() {
-  const article = document.querySelector("article");
+  const article =
+    document.querySelector("article") ||
+    document.querySelector("[role='main']") ||
+    document.querySelector("main");
 
-  if (article) {
-    return article.innerText.trim();
-  }
+  const articleText = article
+    ? article.innerText
+    : document.body.innerText;
 
-  const main = document.querySelector("main");
-
-  if (main) {
-    return main.innerText.trim();
-  }
-
-  const paragraphs = Array.from(document.querySelectorAll("p"))
-    .map((paragraph) => paragraph.innerText.trim())
-    .filter(Boolean);
-
-  return paragraphs.join("\n\n").trim();
-}
-
-function extractArticle() {
   return {
-    title: getArticleTitle(),
-    publisher: getPublisher(),
-    author: getAuthor(),
-    publication_date: getPublicationDate(),
     url: window.location.href,
-    text: getArticleText()
+    title: title.trim(),
+    description: description.trim(),
+    author: author.trim(),
+    publishedTime: publishedTime.trim(),
+    articleText: articleText.trim()
   };
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type !== "VERIFY_ARTICLE") {
-    return;
+
+chrome.runtime.onMessage.addListener(
+  function (message, sender, sendResponse) {
+
+    if (message?.action === "extractPageData") {
+      sendResponse({
+        success: true,
+        data: extractPageData()
+      });
+    }
+
+    return true;
   }
-
-  const article = extractArticle();
-
-  if (!article.title && !article.text) {
-    sendResponse({
-      success: false,
-      error: "We couldn't reliably identify the article on this page."
-    });
-
-    return;
-  }
-
-  sendResponse({
-    success: true,
-    article
-  });
-});
+);

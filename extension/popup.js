@@ -24,8 +24,12 @@ function hideStatus() {
 
 function showResult(data) {
   verdictElement.textContent = formatVerdict(data.verdict);
-  confidenceElement.textContent = formatConfidence(data.confidence);
-  explanationElement.textContent = data.explanation || "No explanation available.";
+
+  confidenceElement.textContent =
+    formatConfidence(data.confidence);
+
+  explanationElement.textContent =
+    data.explanation || "No explanation available.";
 
   resultElement.style.display = "block";
 }
@@ -50,7 +54,10 @@ function formatConfidence(confidence) {
     return "Unknown";
   }
 
-  return confidence.charAt(0) + confidence.slice(1).toLowerCase();
+  return (
+    confidence.charAt(0) +
+    confidence.slice(1).toLowerCase()
+  );
 }
 
 
@@ -65,6 +72,7 @@ async function verifyClaim() {
   }
 
   verifyButton.disabled = true;
+
   showStatus("Checking available evidence...");
 
   try {
@@ -72,14 +80,17 @@ async function verifyClaim() {
       `${API_BASE_URL}/api/verify/claim`,
       {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json"
         },
+
         body: JSON.stringify({
           claim: claim
         })
       }
     );
+
 
     let data = null;
 
@@ -88,6 +99,7 @@ async function verifyClaim() {
     } catch (error) {
       data = null;
     }
+
 
     if (!response.ok) {
       const message =
@@ -98,24 +110,32 @@ async function verifyClaim() {
       throw new Error(message);
     }
 
+
     hideStatus();
+
     showResult(data);
 
   } catch (error) {
+
     hideResult();
 
     if (error instanceof TypeError) {
+
       showStatus(
         "Verify News could not connect to the backend. " +
         "Make sure the FastAPI server is running."
       );
+
     } else {
+
       showStatus(
-        error.message || "Something went wrong while verifying the claim."
+        error.message ||
+        "Something went wrong while verifying the claim."
       );
     }
 
   } finally {
+
     verifyButton.disabled = false;
   }
 }
@@ -130,11 +150,13 @@ verifyButton.addEventListener(
 claimInput.addEventListener(
   "keydown",
   function (event) {
+
     if (
       event.key === "Enter" &&
       (event.ctrlKey || event.metaKey)
     ) {
       verifyClaim();
     }
+
   }
 );

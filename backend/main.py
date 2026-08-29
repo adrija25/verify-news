@@ -27,39 +27,64 @@ app = FastAPI(
 )
 
 
+# ---------------------------------------------------------
+# CORS
+# ---------------------------------------------------------
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+# ---------------------------------------------------------
+# DATABASE
+# ---------------------------------------------------------
+
 Base.metadata.create_all(bind=engine)
+
+
+# ---------------------------------------------------------
+# SERVICES
+# ---------------------------------------------------------
 
 evidence_service = EvidenceService()
 
 
+# ---------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------
+
 def get_user_identifier() -> str:
     """
     Temporary anonymous identifier for the local prototype.
-
-    Authentication will be introduced later if required.
+    Authentication can be added later.
     """
 
     return "anonymous"
 
 
-def build_evidence_response(evidence) -> list[EvidenceResponse]:
+def build_evidence_response(
+    evidence,
+) -> list[EvidenceResponse]:
     """
     Convert internal evidence objects into API response objects.
     """
 
     return [
         EvidenceResponse(
-            source_name=item.publisher or item.domain or "Unknown source",
-            source_type=item.source_type or "Unknown",
+            source_name=(
+                item.publisher
+                or item.domain
+                or "Unknown source"
+            ),
+            source_type=(
+                item.source_type
+                or "Unknown"
+            ),
             source_url=item.url,
             publication_date=item.publication_date,
             evidence_text=item.evidence_text,
@@ -108,17 +133,22 @@ def build_verification_response(
     verification: Verification,
 ) -> VerificationResponse:
     """
-    Build the full verification response for a stored verification.
+    Build the complete verification response.
     """
 
     claim = verification.claim
 
     evidence_response = [
         EvidenceResponse(
-            source_name=item.source.publisher
-            or item.source.domain
-            or "Unknown source",
-            source_type=item.source.source_type or "Unknown",
+            source_name=(
+                item.source.publisher
+                or item.source.domain
+                or "Unknown source"
+            ),
+            source_type=(
+                item.source.source_type
+                or "Unknown"
+            ),
             source_url=item.source.url,
             publication_date=item.source.publication_date,
             evidence_text=item.evidence_text,
@@ -139,6 +169,10 @@ def build_verification_response(
     )
 
 
+# ---------------------------------------------------------
+# HEALTH
+# ---------------------------------------------------------
+
 @app.get(
     "/api/health",
     response_model=HealthResponse,
@@ -150,6 +184,10 @@ def health_check():
     )
 
 
+# ---------------------------------------------------------
+# CLAIM VERIFICATION
+# ---------------------------------------------------------
+
 @app.post(
     "/api/verify/claim",
     response_model=VerificationResponse,
@@ -159,18 +197,32 @@ def verify_claim_endpoint(
     db: Session = Depends(get_db),
 ):
     """
-    Verify one user-submitted claim.
+    Verify one user-submitted news claim.
     """
+
+    if not request.claim.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="A valid claim is required.",
+        )
 
     user_identifier = get_user_identifier()
 
-    if not can_verify(db, user_identifier):
+    if not can_verify(
+        db,
+        user_identifier,
+    ):
         raise HTTPException(
             status_code=429,
-            detail="The free daily verification limit has been reached.",
+            detail=(
+                "The free daily verification "
+                "limit has been reached."
+            ),
         )
 
-    prepared_claim = prepare_claim(request.claim)
+    prepared_claim = prepare_claim(
+        request.claim
+    )
 
     if not prepared_claim["normalized_text"]:
         raise HTTPException(
@@ -178,28 +230,38 @@ def verify_claim_endpoint(
             detail="A valid claim is required.",
         )
 
+    # Search configured evidence sources.
     evidence = evidence_service.search(
         prepared_claim["normalized_text"]
     )
 
+    # Verify claim against retrieved evidence.
     result = verify_claim(
         prepared_claim["normalized_text"],
         evidence,
     )
 
+    # Store result.
     verification = store_verification(
         db,
         prepared_claim,
         result,
     )
 
+    # Record usage.
     record_verification(
         db,
         user_identifier,
     )
 
-    return build_verification_response(verification)
+    return build_verification_response(
+        verification
+    )
 
+
+# ---------------------------------------------------------
+# ARTICLE VERIFICATION
+# ---------------------------------------------------------
 
 @app.post(
     "/api/verify/article",
@@ -210,7 +272,7 @@ def verify_article_endpoint(
     db: Session = Depends(get_db),
 ):
     """
-    Extract multiple likely factual claims from an article
+    Extract likely factual claims from an article
     and verify them individually.
     """
 
@@ -222,10 +284,16 @@ def verify_article_endpoint(
 
     user_identifier = get_user_identifier()
 
-    if not can_verify(db, user_identifier):
+    if not can_verify(
+        db,
+        user_identifier,
+    ):
         raise HTTPException(
             status_code=429,
-            detail="The free daily verification limit has been reached.",
+            detail=(
+                "The free daily verification "
+                "limit has been reached."
+            ),
         )
 
     claims = extract_claims(
@@ -234,12 +302,17 @@ def verify_article_endpoint(
     )
 
     if not claims:
-        prepared_claim = prepare_claim(request.article_text)
+        prepared_claim = prepare_claim(
+            request.article_text
+        )
 
         if not prepared_claim["normalized_text"]:
             raise HTTPException(
                 status_code=400,
-                detail="The article does not contain usable text.",
+                detail=(
+                    "The article does not contain "
+                    "usable text."
+                ),
             )
 
         claims = [prepared_claim]
@@ -247,6 +320,7 @@ def verify_article_endpoint(
     article_results = []
 
     for prepared_claim in claims:
+
         evidence = evidence_service.search(
             prepared_claim["normalized_text"]
         )
@@ -288,6 +362,10 @@ def verify_article_endpoint(
     )
 
 
+# ---------------------------------------------------------
+# SINGLE VERIFICATION LOOKUP
+# ---------------------------------------------------------
+
 @app.get(
     "/api/verification/{verification_id}",
     response_model=VerificationResponse,
@@ -311,8 +389,14 @@ def get_verification(
             detail="Verification not found.",
         )
 
-    return build_verification_response(verification)
+    return build_verification_response(
+        verification
+    )
 
+
+# ---------------------------------------------------------
+# HISTORY
+# ---------------------------------------------------------
 
 @app.get("/api/history")
 def get_history(
@@ -325,19 +409,25 @@ def get_history(
     statement = (
         select(Verification)
         .join(Verification.claim)
-        .order_by(Verification.verified_at.desc())
+        .order_by(
+            Verification.verified_at.desc()
+        )
         .limit(50)
     )
 
-    verifications = db.execute(
-        statement
-    ).scalars().all()
+    verifications = (
+        db.execute(statement)
+        .scalars()
+        .all()
+    )
 
     return {
         "items": [
             {
                 "verification_id": verification.id,
-                "claim": verification.claim.original_text,
+                "claim": (
+                    verification.claim.original_text
+                ),
                 "verdict": verification.verdict,
                 "confidence": verification.confidence,
                 "verified_at": verification.verified_at,

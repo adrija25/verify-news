@@ -1,0 +1,8 @@
+{
+  "name": "verify-news-api",
+  "main": "backend/main.py",
+  "compatibility_date": "2026-08-29",
+  "compatibility_flags": [
+    "python_workers"
+  ]
+}
